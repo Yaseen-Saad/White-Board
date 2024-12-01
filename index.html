@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Advanced Canvas Drawing Board</title>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js?ver=1.4.2"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      height: 100%;
+      font-family: Arial, sans-serif;
+    }
+
+    #myCanvas {
+      cursor: crosshair;
+      position: fixed;
+      top: 0;
+      left: 0;
+      border: 1px solid #ddd;
+    }
+
+    #toolbar {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background-color: rgba(255, 255, 255, 0.8);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    #toolbar button,
+    #toolbar input[type="color"],
+    #toolbar input[type="range"],
+    #toolbar select,
+    #toolbar input[type="file"] {
+      padding: 10px;
+      margin: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      border-radius: 5px;
+      border: none;
+    }
+
+    #toolbar button {
+      background-color: #3498db;
+      color: white;
+    }
+
+    #toolbar button:hover {
+      background-color: #2980b9;
+    }
+
+    #toolbar input[type="color"] {
+      width: 50px;
+      height: 30px;
+    }
+
+    #toolbar select {
+      font-size: 14px;
+      padding: 5px;
+    }
+
+    #toolbar input[type="file"] {
+      font-size: 14px;
+    }
+
+    #grid-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 5;
+      pointer-events: none;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="toolbar">
+    <button id="clear-btn">Clear</button>
+    <button id="grid-btn">Grid</button>
+    <button id="save-btn">Save</button>
+    <input type="color" id="color-picker" value="#000000">
+    <input type="range" id="brush-size" min="1" max="20" value="5">
+    <input type="file" id="bg-upload" accept="image/*">
+    <button id="text-btn">Add Text</button>
+    <button id="gradient-btn">Gradient</button>
+    <button id="eraser-btn">Eraser</button>
+    <button id="undo-btn">Undo</button>
+    <button id="redo-btn">Redo</button>
+  </div>
+
+  <canvas id="myCanvas"></canvas>
+  <canvas id="grid-overlay"></canvas>
+
+  <script>
+    window.onload = function () {
+      const myCanvas = document.getElementById("myCanvas");
+      const ctx = myCanvas.getContext("2d");
+      const gridCanvas = document.getElementById("grid-overlay");
+      const gridCtx = gridCanvas.getContext("2d");
+
+      myCanvas.width = window.innerWidth;
+      myCanvas.height = window.innerHeight;
+
+      gridCanvas.width = myCanvas.width;
+      gridCanvas.height = myCanvas.height;
+
+      let brushSize = 5;
+      let brushColor = "#000000";
+      let isDrawing = false;
+      let isGridVisible = false;
+      let isGradientMode = false;
+      let gradientType = 'linear'; // or 'radial'
+      let gradientStartColor = "#000000";
+      let gradientEndColor = "#ffffff";
+      let isTextMode = false;
+      let textColor = "#000000";
+      let fontSize = 20;
+      let fontFamily = 'Arial';
+      let bgImage = null;
+      let isEraserMode = false;  // Flag to toggle between brush and eraser mode
+
+      // Undo/Redo stacks
+      const undoStack = [];
+      const redoStack = [];
+
+      ctx.lineWidth = brushSize;
+
+      // Save initial state of the canvas
+      saveStateToUndo();
+
+      // Handle Brush Size
+      document.getElementById("brush-size").addEventListener("input", function (e) {
+        brushSize = e.target.value;
+        ctx.lineWidth = brushSize;
+      });
+
+      // Handle Brush Color
+      document.getElementById("color-picker").addEventListener("input", function (e) {
+        brushColor = e.target.value;
+      });
+
+      // Handle Grid Toggle
+      document.getElementById("grid-btn").addEventListener("click", function () {
+        isGridVisible = !isGridVisible;
+        gridCanvas.style.display = isGridVisible ? "block" : "none";
+        if (isGridVisible) drawGrid();
+      });
+
+      // Handle Clear Canvas
+      document.getElementById("clear-btn").addEventListener("click", function () {
+        saveStateToUndo();
+        ctx.clearRect(0, 0, myCanvas.width, myCanvas.height);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, myCanvas.width, myCanvas.height);
+        if (bgImage) {
+          ctx.drawImage(bgImage, 0, 0, myCanvas.width, myCanvas.height);
+        }
+      });
+
+      // Handle Save Drawing
+      document.getElementById("save-btn").addEventListener("click", function () {
+        const dataURL = myCanvas.toDataURL();
+        const link = document.createElement("a");
+        link.href = dataURL;
+        link.download = "drawing.png";
+        link.click();
+      });
+
+      // Handle Background Image Upload
+      document.getElementById("bg-upload").addEventListener("change", function (e) {
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          const img = new Image();
+          img.onload = function () {
+            bgImage = img;
+            ctx.clearRect(0, 0, myCanvas.width, myCanvas.height);
+            ctx.drawImage(img, 0, 0, myCanvas.width, myCanvas.height);
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(e.target.files[0]);
+      });
+
+      // Add Grid Overlay
+      function drawGrid() {
+        gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+        gridCtx.strokeStyle = "#ddd";
+        gridCtx.lineWidth = 1;
+
+        for (let x = 0; x < gridCanvas.width; x += 20) {
+          gridCtx.moveTo(x, 0);
+          gridCtx.lineTo(x, gridCanvas.height);
+        }
+
+        for (let y = 0; y < gridCanvas.height; y += 20) {
+          gridCtx.moveTo(0, y);
+          gridCtx.lineTo(gridCanvas.width, y);
+        }
+
+        gridCtx.stroke();
+      }
+
+      // Handle Drawing Mode
+      $(myCanvas).mousedown(function (e) {
+        if (isEraserMode) {
+          // Erase mode
+          ctx.globalCompositeOperation = "destination-out"; // Allow erasing
+          isDrawing = true;
+          ctx.beginPath();
+          ctx.moveTo(e.pageX - myCanvas.offsetLeft, e.pageY - myCanvas.offsetTop);
+        } else {
+          // Freehand drawing mode
+          ctx.globalCompositeOperation = "source-over"; // Normal drawing
+          isDrawing = true;
+          ctx.beginPath();
+          ctx.moveTo(e.pageX - myCanvas.offsetLeft, e.pageY - myCanvas.offsetTop);
+        }
+      }).mousemove(function (e) {
+        if (isDrawing) {
+          ctx.lineTo(e.pageX - myCanvas.offsetLeft, e.pageY - myCanvas.offsetTop);
+          if (isEraserMode) {
+            ctx.strokeStyle = "#ffffff"; // Use white color for erasing
+          } else {
+            ctx.strokeStyle = brushColor; // Use brush color for drawing
+          }
+          ctx.lineWidth = brushSize;
+          ctx.stroke();
+        }
+      }).mouseup(function () {
+        isDrawing = false;
+        saveStateToUndo(); // Save canvas state after drawing
+      });
+
+      // Handle Eraser Button Toggle
+      document.getElementById("eraser-btn").addEventListener("click", function () {
+        isEraserMode = !isEraserMode;
+        this.style.backgroundColor = isEraserMode ? "#e74c3c" : "#3498db"; // Change color for active mode
+      });
+
+      // Handle Undo
+      document.getElementById("undo-btn").addEventListener("click", function () {
+        if (undoStack.length > 0) {
+          const lastState = undoStack.pop();
+          redoStack.push(ctx.getImageData(0, 0, myCanvas.width, myCanvas.height));
+          ctx.putImageData(lastState, 0, 0);
+        }
+      });
+
+      // Handle Redo
+      document.getElementById("redo-btn").addEventListener("click", function () {
+        if (redoStack.length > 0) {
+          const redoState = redoStack.pop();
+          undoStack.push(ctx.getImageData(0, 0, myCanvas.width, myCanvas.height));
+          ctx.putImageData(redoState, 0, 0);
+        }
+      });
+
+      // Save Canvas State to Undo Stack
+      function saveStateToUndo() {
+        undoStack.push(ctx.getImageData(0, 0, myCanvas.width, myCanvas.height));
+        redoStack.length = 0; // Clear redo stack when a new action is performed
+      }
+
+      // Handle Gradient
+      document.getElementById("gradient-btn").addEventListener("click", function () {
+        isGradientMode = !isGradientMode;
+        if (isGradientMode) {
+          const gradient = (gradientType === "linear") ? 
+            ctx.createLinearGradient(0, 0, myCanvas.width, myCanvas.height) :
+            ctx.createRadialGradient(myCanvas.width / 2, myCanvas.height / 2, 0, myCanvas.width / 2, myCanvas.height / 2, myCanvas.width / 2);
+          gradient.addColorStop(0, gradientStartColor);
+          gradient.addColorStop(1, gradientEndColor);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, myCanvas.width, myCanvas.height);
+        }
+      });
+    };
+  </script>
+
+</body>
+</html>
